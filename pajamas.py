@@ -1,10 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import numpy as np
 
-rng = np.random.default_rng(42)
+
 #Table 1: Products table, catalog like
 def generate_products(n=600):
+    global rng
+    rng = np.random.default_rng(42)
     size_a = [4, 6, 8, 10, 12, 14, 16]
     size_b = ['XS', 'X', 'M', 'L', 'XL']
 
@@ -59,7 +62,6 @@ def generate_products(n=600):
 df = generate_products()
 print(df.head())
 
-
 #Table 2: Movements Generator, ledger like
 def generate_movements(products):
     months = pd.date_range('2015-03-01', '2019-11-01', freq='MS')
@@ -94,3 +96,53 @@ print(df2['sku_id'].nunique())
 print(df2['sku_id'].isin(df['SKU']).all())
 print(df2['date'].min())
 print(df2['date'].max())
+
+#Monthly Sales Trend
+def sales_trend(movements):
+    sales = movements[movements['type'] == 'Sell'].copy()
+    sales['revenue'] = sales['quantity'] * sales['unit_price']
+    return sales.groupby(sales['date'].dt.to_period('M'))['revenue'].sum()   # filter ROWS with the mask
+monthly = sales_trend(df2)
+
+def plot_trends(monthly):
+    g = monthly.groupby(monthly.index.year)   # group by the year of each Period
+    peak_month = g.idxmax()                   # year -> the peak month (Period)
+    peak_val   = g.max()                      # year -> the peak revenue
+    x = monthly.index.to_timestamp()          # Period -> real datetimes    
+    y = monthly.values / 1_000_000            # revenue in millions
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(x, y, marker='o', markersize=4)
+    ax.grid(True)
+    ax.set_title('Monthly sales revenue 2015-2019')
+    ax.set_xlabel('Months')
+    ax.set_ylabel('COP (millions)')
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))         # tick every 6 months
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))        
+    ax.figure.autofmt_xdate()
+    peak_x = monthly.idxmax().to_timestamp()                            # x of the max (Dec 2015)
+    peak_y = monthly.max() / 1_000_000                                  # y of the max, in millions
+    for yr in peak_val.index:
+        px = peak_month[yr].to_timestamp()
+        py = peak_val[yr] / 1e6
+        ax.annotate(str(peak_month[yr]), xy=(px, py), xytext=(px, py + 1), horizontalalignment='left')
+    plt.show()  
+
+
+    cum = monthly.cumsum()
+    gc = cum.groupby(cum.index.year)
+    ye_month = gc.idxmax()                                              # Dec of each year
+    ye_val   = gc.max()                                                 # cumulative total at that Dec
+
+    ax = (cum/1e9).plot(marker='o', markersize=3, figsize = (10, 4))   
+    ax.grid(True);
+    ax.set_title('Total revenue accumulated 2015-2019');
+    ax.set_xlabel('Dates');
+    ax.set_ylabel('COP (billions)');
+    for yr in ye_val.index:
+        px = ye_month[yr].to_timestamp()
+        py = ye_val[yr] / 1e9
+        ax.annotate(f'{ye_val[yr]/1e9:.1f}B', xy=(px, py), xytext=(px, py -0.4), horizontalalignment='right',
+                    arrowprops=dict(arrowstyle='->'))
+    plt.show()
+plot_trends(monthly)   

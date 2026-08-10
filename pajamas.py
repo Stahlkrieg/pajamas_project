@@ -1,6 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.ticker as ticker
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 import numpy as np
 
 
@@ -60,7 +63,7 @@ def generate_products(n=600):
     df.insert(0, 'SKU', ['PJ-%03d' % i for i in range(1, 251)])
     return df
 df = generate_products()
-print(df.head())
+#print(df.head())
 
 #Table 2: Movements Generator, ledger like
 def generate_movements(products):
@@ -72,10 +75,13 @@ def generate_movements(products):
 
     events = []
     price_by_sku = dict(zip(products['SKU'], products['Unit Price']))     
+    popularity = {sku: rng.choice([1, 3, 10,60], p=[0.6, 0.25, 0.10, 0.05])                  
+              for sku in products['SKU']}
+    
     for sku in df['SKU']:                                     
         for m in months:                                      
             season = seasonality[m.month]                 
-            for sell_ in range(rng.integers(1, 4)):              
+            for sell_ in range(int(rng.integers(1, 4) * popularity[sku])):              
                 events.append({'date': random_day_in(m), 'sku_id': sku, 'type': 'Sell',
                             'quantity': int(rng.integers(2,10) * season),
                             'unit_price': price_by_sku[sku]})
@@ -88,14 +94,14 @@ def generate_movements(products):
     return df2 
 df2 = generate_movements(df)
 
-#QA
+'''#QA
 print(df2.head())
 print((df2['quantity'] > 0).all())
 print(df2['type'].value_counts())
 print(df2['sku_id'].nunique())
 print(df2['sku_id'].isin(df['SKU']).all())
 print(df2['date'].min())
-print(df2['date'].max())
+print(df2['date'].max())'''
 
 #Monthly Sales Trend
 def sales_trend(movements):
@@ -111,7 +117,7 @@ def plot_trends(monthly):
     x = monthly.index.to_timestamp()          # Period -> real datetimes    
     y = monthly.values / 1_000_000            # revenue in millions
 
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = plt.subplots(figsize=(14, 6))
     ax.plot(x, y, marker='o', markersize=4)
     ax.grid(True)
     ax.set_title('Monthly sales revenue 2015-2019')
@@ -134,7 +140,7 @@ def plot_trends(monthly):
     ye_month = gc.idxmax()                                              # Dec of each year
     ye_val   = gc.max()                                                 # cumulative total at that Dec
 
-    ax = (cum/1e9).plot(marker='o', markersize=3, figsize = (10, 4))   
+    ax = (cum/1e9).plot(marker='o', markersize=3, figsize = (14, 6))   
     ax.grid(True);
     ax.set_title('Total revenue accumulated 2015-2019');
     ax.set_xlabel('Dates');
@@ -142,7 +148,83 @@ def plot_trends(monthly):
     for yr in ye_val.index:
         px = ye_month[yr].to_timestamp()
         py = ye_val[yr] / 1e9
-        ax.annotate(f'{ye_val[yr]/1e9:.1f}B', xy=(px, py), xytext=(px, py -0.4), horizontalalignment='right',
+        ax.annotate(f'{ye_val[yr]/1e9:.1f}B', xy=(px, py), xytext=(px, py + 0.2), horizontalalignment='right',
                     arrowprops=dict(arrowstyle='->'))
     plt.show()
-plot_trends(monthly)   
+plot_trends(monthly)  
+
+
+#ABC and Pareto Chart
+def sales_revenue(abc):
+    t_sales = abc[abc['type']=='Sell'].copy()
+    t_sales['revenue'] = t_sales['quantity'] * t_sales['unit_price']
+    return t_sales.groupby(t_sales['sku_id'])['revenue'].sum().sort_values(ascending = False)
+pareto = sales_revenue(df2)
+run_total = pd.Series(pareto).cumsum()
+cum_per = pd.Series(pareto).cumsum()/pareto.sum()*100
+bucket = []
+
+for i in cum_per:
+    if i <= 80:  bucket.append('A')    
+    elif i <= 95: bucket.append('B')     
+    else: bucket.append('C')     
+
+dar = {
+    'revenue' : pd.Series(pareto),
+    'running total' : pd.Series(run_total),
+    'cummulative %' : pd.Series(cum_per),
+    'bucket': pd.Series(bucket, index=pareto.index)
+
+}
+df3 = pd.DataFrame(dar)
+print(df3)
+
+
+def plot_pareto(df3, top_n=30):
+    pareto  = df3['revenue']
+    cum_per = df3['cummulative %']
+    colors  = df3['bucket'].map({'A':'#d62728','B':'#ff7f0e','C':'#1f77b4'})
+    x = range(len(pareto))
+
+    # full view
+    fig, ax = plt.subplots(figsize=(14,6))
+    ax.bar(x, pareto.values/1e6, color=colors);
+    ax2 = ax.twinx()
+    ax2.plot(x, cum_per.values, color='green');
+    ax2.axhline(80, color='gray', linestyle='--');
+    ax2.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v,_: f'{int(v)}%'));
+    ticks = range(0, len(pareto), 50)
+    ax.set_xticks(ticks);
+    ax.set_xticklabels([pareto.index[i] for i in ticks], rotation=45);
+    pos = int((cum_per.values >= 80).argmax())
+    ax.axvline(pos, color='gray', linestyle=':');
+    ax.annotate(f'top {pos} SKUs ≈ 80%', xy=(pos, pareto.values[pos]/1e6),
+                xytext=(pos+20, 600), arrowprops=dict(arrowstyle='->'));
+    handles = [Patch(color='#d62728',label='A'), Patch(color='#ff7f0e',label='B'),
+               Patch(color='#1f77b4',label='C'), Line2D([0],[0],color='green',label='Cumulative %')]
+    ax.legend(handles=handles, loc='center right');
+    ax.set_title('Pareto: SKU revenue concentration');
+    ax.grid(True);
+    ax.set_xlabel('TOP SKU');
+    ax.set_ylabel('Revenue (Millions)');
+    ax2.set_ylabel('Cummulative [%]');
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    ax2.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+
+    # zoom view
+    top = pareto.head(top_n)
+    fig, axz = plt.subplots(figsize=(14,6))
+    axz.bar(range(top_n), top.values/1e6, color=colors.head(top_n));
+    axz.set_xticks(range(top_n));
+    axz.set_xticklabels(top.index, rotation=45);
+    axz.set_title(f'Top {top_n} SKUs by revenue');
+    axz.grid(True);
+    axz.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    axz2 = axz.twinx()
+    axz2.plot(range(top_n), cum_per.head(top_n).values, color='green');
+    axz2.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f'{int(v)}%'));
+    axz2.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    axz.set_ylabel('Revenue (Millions)');
+    axz2.set_ylabel('Cumulative [%]');
+    plt.show()
+plot_pareto(df3)

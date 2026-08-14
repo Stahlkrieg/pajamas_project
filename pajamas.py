@@ -75,24 +75,30 @@ def generate_movements(products):
 
     events = []
     price_by_sku = dict(zip(products['SKU'], products['Unit Price']))     
-    popularity = {sku: rng.choice([1, 3, 10,60], p=[0.6, 0.25, 0.10, 0.05])                  
-              for sku in products['SKU']}
+    popularity = {sku: rng.choice([1, 3, 10,60], p=[0.6, 0.25, 0.10, 0.05]) for sku in products['SKU']}
+    init_by_sku  = dict(zip(products['SKU'], products['Initial Stock']))
+    reorder_by_sku = dict(zip(products['SKU'], products['Reorder Point']))
     
-    for sku in df['SKU']:                                     
-        for m in months:                                      
-            season = seasonality[m.month]                 
-            for sell_ in range(int(rng.integers(1, 4) * popularity[sku])):              
-                events.append({'date': random_day_in(m), 'sku_id': sku, 'type': 'Sell',
-                            'quantity': int(rng.integers(2,10) * season),
-                            'unit_price': price_by_sku[sku]})
-            for restock_ in range(rng.integers(1, 3)):              
-                events.append({'date': random_day_in(m), 'sku_id': sku, 'type': 'Restock',
-                            'quantity': int(rng.integers(10,50)),
-                            'unit_price': price_by_sku[sku]})
-             
+    for sku in df['SKU']:      
+        shelf = init_by_sku[sku]                 
+        for m in months:
+            season = seasonality[m.month]
+            month_sells = [(random_day_in(m), int(rng.integers(2,10)*season)) for _ in range(int(rng.integers(1,4)*popularity[sku]))]
+            month_sells.sort(key=lambda t: t[0])
+
+            for day, quantity in month_sells:
+                shelf -= quantity
+                events.append({'date': day, 'sku_id': sku, 'type':'Sell',
+                            'quantity': quantity, 'unit_price': price_by_sku[sku]})
+                if shelf < reorder_by_sku[sku]:
+                    amount = init_by_sku[sku] - shelf
+                    shelf += amount
+                    events.append({'date': day + pd.Timedelta(days=1), 'sku_id': sku,
+                                'type':'Restock', 'quantity': amount, 'unit_price': price_by_sku[sku]})
     df2 = pd.DataFrame(events)
     return df2 
 df2 = generate_movements(df)
+print(df2)
 
 '''#QA
 print(df2.head())
@@ -151,7 +157,7 @@ def plot_trends(monthly):
         ax.annotate(f'{ye_val[yr]/1e9:.1f}B', xy=(px, py), xytext=(px, py + 0.2), horizontalalignment='right',
                     arrowprops=dict(arrowstyle='->'))
     plt.show()
-plot_trends(monthly)  
+#plot_trends(monthly)  
 
 
 #ABC and Pareto Chart
@@ -177,7 +183,7 @@ dar = {
 
 }
 df3 = pd.DataFrame(dar)
-print(df3)
+#print(df3)
 
 
 def plot_pareto(df3, top_n=30):
@@ -227,4 +233,49 @@ def plot_pareto(df3, top_n=30):
     axz.set_ylabel('Revenue (Millions)');
     axz2.set_ylabel('Cumulative [%]');
     plt.show()
-plot_pareto(df3)
+#plot_pareto(df3)
+
+#stock levels + restocking cycles
+def build_stock_flow(df2, df):
+    flow = df2.copy()
+    event = []
+    flow['flow'] = np.where(flow['type'] == 'Sell', -flow['quantity'], flow['quantity'])
+    flow = flow.sort_values('date')
+    flow['cum_sum'] = flow.groupby('sku_id')['flow'].cumsum()
+    new_stock = dict(zip(df['SKU'], df['Initial Stock']))
+    flow['stock'] = flow['sku_id'].map(new_stock)
+    flow['stock_level'] = flow['stock'] + flow['cum_sum']
+    return flow 
+flow = build_stock_flow(df2, df)            
+
+hit  = df3.index[0]
+tail = df3.index[-1]
+
+def plot_flow(flow):
+    hit_1 = (flow['sku_id'] == hit) & (flow['date'].dt.year == 2017) & (flow['date'].dt.month >= 10)
+    tail_1 =(flow['sku_id']==tail) & (flow['date'].dt.year==2017) & (flow['date'].dt.month >= 10)
+    sel = flow[hit_1]
+    tel = flow[tail_1]
+    x_hit = sel['date'].values 
+    y_hit = sel['stock_level'].values
+    x_tail = tel['date'].values 
+    y_tail = tel['stock_level'].values
+
+    rp = dict(zip(df['SKU'], df['Reorder Point']))   # SKU -> reorder point
+
+    fig, ax = plt.subplots(figsize=(14,6))
+    ax.plot(x_hit, y_hit, color='red', label = 'PJ-221')
+    ax.legend()  
+    ax2 = ax.twinx()
+    ax2.plot(x_tail, y_tail, color='orange', label = 'PJ-151')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Stock Level Value')
+    ax.set_title('PJ-221 vs PJ-151') 
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    ax.grid()
+    ax.axhline(rp[hit],  color='red',    ls='--')
+    ax2.axhline(rp[tail], color='orange', ls='--')   
+    ax2.legend()    
+    plt.show()
+plot_flow(flow)

@@ -52,14 +52,14 @@ Total revenue accumulated over 5 years.
 
 ### 2 · ABC / Pareto classification
 SKUs ranked by revenue with the cumulative-share line.
-![Pareto](pictures/P1.png)
+![Pareto](figures/P1.png)
 - Revenue concentrates in a small A-class (~80/20), guiding differentiated control.
-![Pareto](pictures/P2.png)
+![Pareto](figures/P2.png)
 - Focused view on the top 30 SKUs.
 
 ### 3 · Stock levels & restocking cycles
 Running stock per SKU vs. its reorder point; hit vs. tail comparison.
-![Stock levels](pictures/Restock_1.png)
+![Stock levels](figures/Restock_1.png)
 - **Fast movers** sawtooth tightly, refilling several times a month.
 - **Slow movers** drain gently, restocking rarely.
 - It's expect that under the current policy, A-items will show brief **stockouts at peak demand**.
